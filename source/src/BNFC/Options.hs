@@ -64,7 +64,7 @@ data Target = TargetC | TargetCpp | TargetCppNoStl
             | TargetHaskell | TargetHaskellGadt | TargetLatex
             | TargetJava | TargetOCaml | TargetPygments
             | TargetTreeSitter
-            | TargetCheck
+            | TargetCheck | TargetAntlr
   deriving (Eq, Bounded, Enum, Ord)
 
 -- | List of Haskell target.
@@ -83,6 +83,7 @@ instance Show Target where
   show TargetPygments     = "Pygments"
   show TargetTreeSitter   = "Tree-sitter"
   show TargetCheck        = "Check LBNF file"
+  show TargetAntlr        = "Antlr4"
 
 -- | Which version of Alex is targeted?
 data AlexVersion = Alex3
@@ -262,6 +263,7 @@ printTargetOption = ("--" ++) . \case
   TargetPygments    -> "pygments"
   TargetTreeSitter  -> "tree-sitter"
   TargetCheck       -> "check"
+  TargetAntlr       -> "antlr4"
 
 printAlexOption :: AlexVersion -> String
 printAlexOption = ("--" ++) . \case
@@ -316,6 +318,8 @@ targetOptions =
     "Output grammar.js file for use with tree-sitter"
   , Option "" ["check"]         (NoArg (\ o -> o{target = TargetCheck }))
     "No output. Just check input LBNF file"
+  , Option "" ["antlr"]         (NoArg (\o -> o{target = TargetAntlr}))
+    "Not implemented yet."
   ]
 
 -- | A list of the options and for each of them, the target language
@@ -531,6 +535,7 @@ instance Maintained Target where
     TargetPygments    -> True
     TargetTreeSitter  -> True
     TargetCheck       -> True
+    TargetAntlr       -> True
 
 instance Maintained AlexVersion where
   printFeature = printAlexOption

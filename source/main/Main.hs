@@ -82,6 +82,6 @@ maketarget = \case
     TargetJava         -> makeJava
     TargetOCaml        -> makeOCaml
     TargetPygments     -> makePygments
-    TargetAntlr       -> makeAntlr
+    TargetAntlr        -> makeAntlr
     TargetCheck        -> error "impossible"
     TargetTreeSitter   -> makeTreeSitter

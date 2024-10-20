@@ -279,6 +279,11 @@ library
     -- Pygments backend
     BNFC.Backend.Pygments
 
+    -- Python3 backend
+    BNFC.Backend.Python3
+    BNFC.Backend.Python3.Common
+    BNFC.Backend.Python3.CFtoPython3AST
+
     -- Agda backend
     BNFC.Backend.Agda
 

@@ -25,6 +25,7 @@ import BNFC.Backend.Java
 import BNFC.Backend.Latex
 import BNFC.Backend.OCaml
 import BNFC.Backend.Pygments
+import BNFC.Backend.Python3 (makePython3)
 import BNFC.Backend.TreeSitter
 import BNFC.Backend.Antlr
 import BNFC.CF (CF)
@@ -82,6 +83,7 @@ maketarget = \case
     TargetJava         -> makeJava
     TargetOCaml        -> makeOCaml
     TargetPygments     -> makePygments
+    TargetPython3      -> makePython3
     TargetAntlr        -> makeAntlr
     TargetCheck        -> error "impossible"
     TargetTreeSitter   -> makeTreeSitter

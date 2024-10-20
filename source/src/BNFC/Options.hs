@@ -63,7 +63,7 @@ data Mode
 -- | Target languages
 data Target = TargetC | TargetCpp | TargetCppNoStl
             | TargetHaskell | TargetHaskellGadt | TargetLatex
-            | TargetJava | TargetOCaml | TargetPygments
+            | TargetJava | TargetOCaml | TargetPygments | TargetPython3
             | TargetTreeSitter
             | TargetCheck | TargetAntlr
   deriving (Eq, Bounded, Enum, Ord)
@@ -82,6 +82,7 @@ instance Show Target where
   show TargetJava         = "Java"
   show TargetOCaml        = "OCaml"
   show TargetPygments     = "Pygments"
+  show TargetPython3       = "Python3"
   show TargetTreeSitter   = "Tree-sitter"
   show TargetCheck        = "Check LBNF file"
   show TargetAntlr        = "ANTLRv4"
@@ -299,6 +300,7 @@ printTargetOption = ("--" ++) . \case
   TargetJava        -> "java"
   TargetOCaml       -> "ocaml"
   TargetPygments    -> "pygments"
+  TargetPython3      -> "python3"
   TargetTreeSitter  -> "tree-sitter"
   TargetCheck       -> "check"
   TargetAntlr       -> "antlr4"
@@ -352,12 +354,14 @@ targetOptions =
     "Output OCaml code for use with ocamllex and menhir (short for --ocaml --menhir)"
   , Option "" ["pygments"]      (NoArg (\o -> o {target = TargetPygments}))
     "Output a Python lexer for Pygments"
+  , Option "" ["python3"]       (NoArg (\o -> o {target = TargetPython3}))
+    "TBA"
   , Option "" ["tree-sitter"]   (NoArg (\o -> o {target = TargetTreeSitter}))
     "Output grammar.js file for use with tree-sitter"
   , Option "" ["check"]         (NoArg (\o -> o{target = TargetCheck }))
     "No output. Just check input LBNF file"
   , Option "" ["antlr"]         (NoArg (\o -> o {target = TargetAntlr}))
-    "Output lexer and parser grammars for ANTLRv4"
+    "Output lexer and parser grammars for ANTLRv4" 
   ]
 
 -- | A list of the options and for each of them, the target language
@@ -611,6 +615,7 @@ instance Maintained Target where
     TargetJava        -> True
     TargetOCaml       -> True
     TargetPygments    -> True
+    TargetPython3     -> True
     TargetTreeSitter  -> True
     TargetCheck       -> True
     TargetAntlr       -> True
@@ -728,6 +733,7 @@ translateOldOptions = mapM $ \ o -> do
     , ("-csharp"       , "--csharp")
     , ("-ocaml"        , "--ocaml")
     , ("-haskell"      , "--haskell")
+    , ("-python"       , "--python3")
     , ("-prof"         , "--profile")
     , ("-gadt"         , "--haskell-gadt")
     , ("-alex1"        , "--alex1")

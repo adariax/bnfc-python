@@ -7,7 +7,9 @@ module BNFC.Backend.Python3.Common where
 import qualified Data.Map as Map
 import BNFC.CF
 import Data.Maybe
+import BNFC.Utils (mkName, NameStyle (OrigCase, MixedCase), mkNames)
 import qualified Data.Char as Char
+import Data.Char (toLower)
 
 cat2Python3ClassName :: String -> Cat -> String
 cat2Python3ClassName langName cat = str2Python3ClassName langName $ identCat $ normCat cat
@@ -42,6 +44,20 @@ cat2Python3Name langName cat = toList $ normCat cat
   where
     toList (ListCat name) = toList name ++ "list"
     toList name = censorName langName $ catToStr name
+
+getAllTokenCats :: CF -> [Cat]
+getAllTokenCats cf = map TokenCat (literals cf)
+
+getAllTokenTypenames :: CF -> [String]
+getAllTokenTypenames cf = map cat2Python3Type' (getAllTokenCats cf)
+
+cat2Python3Type' :: Cat -> String
+cat2Python3Type' (ListCat c) = "[" ++ cat2Python3Type' c ++ "]"
+cat2Python3Type' (TokenCat c) = toMixedCase (c ++ "Token")
+cat2Python3Type' cat = toMixedCase (catToStr cat)
+
+toMixedCase :: String -> String
+toMixedCase = upperFirst . mkName reservedKeywords MixedCase
 
 name2Python3BuiltIn :: String -> Maybe String
 name2Python3BuiltIn name
@@ -110,6 +126,27 @@ getVars langName cats =
             else (
               Map.insert name (seen + 1, total) namesMap, 
               vars ++ [(vType, (name, seen))])
+
+getVarsFromCats :: String -> [Cat] -> [String]
+getVarsFromCats langName cats = mkNames ["type"] OrigCase normalizedVars
+  where
+    normalizedCats = map normCat cats
+    indexedVars = getVars langName normalizedCats
+
+    normalizeVar :: Python3Var -> String
+    normalizeVar (_, (varName, idx)) = map toLower varName ++ varNameSuffix
+      where
+        varNameSuffix = if idx == 0 then "" else show idx
+
+    normalizedVars = map normalizeVar indexedVars
+
+mkBuildFnName :: Cat -> String
+mkBuildFnName cat = "build" ++ upperFirst (restName cat)
+  where
+    restName cat = case cat of
+      ListCat cat  -> restName cat ++ "List"
+      TokenCat cat -> cat ++ "Token"
+      otherCat     -> catToStr otherCat
 
 -- From a Python3Var build its string representation
 buildVariableName :: Python3Var -> String
@@ -197,3 +234,6 @@ pythonReserved =
     , "match"
     , "case"
     , "type" ]
+
+reservedKeywords :: [String]
+reservedKeywords = builtIn ++ pythonReserved

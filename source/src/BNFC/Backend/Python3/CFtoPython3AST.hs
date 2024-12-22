@@ -14,14 +14,17 @@ import Data.List (intercalate, intersperse)
 unwords' :: [String] -> String
 unwords' = concat . intersperse ""
 
+joinArgs :: [String] -> String
+joinArgs = intercalate "\n"
+
 -- Produces abstract data types in Python3
 cf2Python3AST :: String -> CF -> String
 cf2Python3AST langName cf = 
   let userTokens = [ n | (n,_) <- tokenPragmas cf ]
   in unlines 
-    $ imports ++ [ "" ]  -- import some libraries if needed
+    $ imports ++ [ "from dataclasses import dataclass" ]  -- import some libraries if needed
     ++ characterTypedef
-    ++ generateTokens userTokens ++ [ "" ]
+    ++ generateTokens userTokens
     ++ generateBaseClass ++ [ "\n" ]
     ++ concatMap astClasses rules  -- generate user-defined types
   where
@@ -64,10 +67,8 @@ cf2Python3AST langName cf =
       where
         caseName = str2Python3ClassName' fun
         vars = getVars' cats
-        caseAssociatedValues = map (\var -> buildVariableName var ++ ": " ++ buildVariableType var) vars
-        resultAssociatedValuesConcatenated
-          | null vars = ""
-          | otherwise = (intercalate ", " caseAssociatedValues)
-        result = unwords' $ ["class" +++ caseName ++ "(Exp):" ++ "\n"]
-                          ++ indent 1 ["def __init__(self," +++ resultAssociatedValuesConcatenated ++ "):", "\n" ]
-                          ++ indent 2 [ "...", "\n\n" ]
+        caseAssociatedValues = map (\var -> buildVariableName var ++ ": " ++ buildVariableType var ++ "\n") vars
+        result = unwords' $ ["@dataclass" ++ "\n"]
+                          ++ ["class" +++ caseName ++ "(Exp):" ++ "\n"]
+                          ++  indent 1 caseAssociatedValues
+                          ++ ["\n"]

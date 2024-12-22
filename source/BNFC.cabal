@@ -283,6 +283,7 @@ library
     BNFC.Backend.Python3
     BNFC.Backend.Python3.Common
     BNFC.Backend.Python3.CFtoPython3AST
+    BNFC.Backend.Python3.CFtoPython3Builder
 
     -- Agda backend
     BNFC.Backend.Agda

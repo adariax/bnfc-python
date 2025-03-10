@@ -20,20 +20,19 @@ type RuleData = (Cat, [(String, SentForm)])
 joinParamsWithComma :: [String] -> String
 joinParamsWithComma = intercalate ",\n"
 
--- getVarsFromCats :: String -> [Cat] -> [String]
--- getVarsFromCats prefix cats = zipWith (\i cat -> prefix ++ show i) [1..] cats
-
 cf2Python3Builder :: CF -> SharedOptions -> Doc
 cf2Python3Builder cf opts = vcat $
     [ importDecls
     , tokenDecls
     , buildFnDecls
+    , buildEntrypointDecl
     ]
   where
     language = lang opts
     importDecls = mkImportDecls cf (lang opts)
     tokenDecls = vcat $ intersperse (text "") buildTokensFuns
     buildFnDecls = vcat $ intersperse (text "") buildFuns
+    buildEntrypointDecl = mkBuildEntrypointFunction language cf
     buildFuns = map (mkBuildFunction language) datas
     buildTokensFuns = map mkBuildTokenFunction allTokenCats
     allTokenCats = getAllTokenCats cf
@@ -44,8 +43,11 @@ mkImportDecls :: CF -> String -> Doc
 mkImportDecls cf lang = vcat
     [
         "from typing import assert_never"
+        , ""
         , "from .ast import *"
-        , text ctxImportStmt
+        , ctxImportStmt
+        , ""
+        , "from antlr4 import CommonTokenStream"
         , "\n"
         ]
   where
@@ -54,13 +56,15 @@ mkImportDecls cf lang = vcat
     ctxImports = intercalate ", " $ nub $ map (++ "Context") ctxNames
 
     tokenTypenames = getAllTokenTypenames cf
-    -- typenames = nub $ tokenTypenames ++ (map (catToTsType . fst) $ filter (isUsualCat . fst) groups)
-    -- astImports = intercalate ", " (filter (not . null) typenames)
 
-    ctxImportStmt = "from .." ++ parser +++ "import" +++ parser
-    -- astImportStmt = "import {" ++ astImports ++ "} from './abstract'"
+    ctxImportStmt = vcat $
+      [
+          vcat (map text ["from ." ++ parser +++ "import" +++ parser])
+          , vcat (map text ["from ." ++ lexer +++ "import" +++ lexer])
+        ]
 
     parser = camelCase_ $ lang ++ "Parser"
+    lexer = camelCase_ $ lang ++ "Lexer"
 
     isUsualCat (Cat _) = True
     isUsualCat _       = False
@@ -124,6 +128,24 @@ mkBuildFunction lang (cat, rulesWithLabels) = vcat
               ]
             where
               varNames = getVarsFromCats "" (map fst rhsRuleWithIdx)
+
+
+mkBuildEntrypointFunction :: String -> CF -> Doc
+mkBuildEntrypointFunction lang cf = vcat
+    [ text $ "def build(" ++ inputArg ++ ") ->" +++ cat2Python3Type' cat ++ ":"
+    , vcat (map text (indent 1 ["lexer =" +++ lexer ++ "(" ++ inputArg ++ ")"]))
+    , vcat (map text (indent 1 ["stream =" +++ "CommonTokenStream(lexer)"]))
+    , vcat (map text (indent 1 ["parser =" +++ parser ++ "(stream)"]))
+    , ""
+    , vcat (map text (indent 1 ["return" +++ mkBuildFnName cat ++ "(parser.start_" ++ cat2Python3Type' cat ++ "().children[0])"]))
+    ]
+  where
+    groups = cfToGroups cf
+    cat = (fst (head groups))
+
+    inputArg = "input_stream"
+    parser = camelCase_ $ lang ++ "Parser"
+    lexer = camelCase_ $ lang ++ "Lexer"
 
 
 cfToGroups :: CF -> [RuleData]

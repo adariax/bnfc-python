@@ -24,12 +24,9 @@ import BNFC.Backend.Python3.Common ( indent, buildVariableTypeFromPython3Type, c
 makePython3 :: SharedOptions -> CF -> MkFiles ()
 makePython3 opts@Options{..} cf = do
     let dirBase = replace '.' pathSeparator $ packageName
-        langBase = dirBase </> (langName ++ "_generated")
+        langBase = dirBase
         libLang = langBase
         srcLang = libLang
-        -- libBase = dirBase </> "lib"
-        -- binBase = dirBase </> "bin"
-        -- directoryOptions = DirectoryOptions{baseDirectory = Just srcLang, nameStyle = Just SnakeCase}
         
         -- Generates files in an incorrect place
     makeAntlr (opts {dLanguage = Python3, optMake = Nothing}) cf
@@ -42,28 +39,10 @@ makePython3 opts@Options{..} cf = do
   where
     astContent = cf2Python3AST (firstLowerCase langName) cf
     builderContent = cf2Python3Builder cf opts
-    mainContent = unlines 
-      [ "import test.py"
-      , "def main(args):"
-      , "  test = Test()"
-      , "  test.run(args)" ]
     packageName = maybe id (+.+) inPackage $ mkName [] CamelCase lang
     langName = mkName [] CamelCase lang
     -- langNameUpperCased = firstUpperCase langName
     importLangName = "import 'package:" ++ langName ++ "_generated/" ++ langName ++ "_generated.Python3';"
-    
-    -- pubspecContent moduleName desc deps = unlines (
-    --   [ "name:" +++ moduleName 
-    --   , "description:" +++ desc
-    --   , "version: 1.0.0"
-    --   , "publish_to: 'none'"
-    --   , "environment:"
-    --   , "  sdk: ^3.4.0"
-    --   , "dependencies:"
-    --   , "  antlr4: ^4.13.1"
-    --   , "  fast_immutable_collections: ^10.2.2" 
-    --   ] ++ (indent 1 deps) ++ [ "dev_dependencies:"
-    --   , "  lints: ^4.0.0" ])
 
     lexerClassName = lang ++ "GrammarLexer"
     parserClassName = lang ++ "GrammarParser"
@@ -90,12 +69,6 @@ makePython3 opts@Options{..} cf = do
         , ("parser"
             , [refSrcVar "PARSER_NAME" ++ ".g4"]
             , [MakeFile.refVar "ANTLR4" +++ "-Dlanguage=Python3" +++ "-no-listener" +++ "-no-visitor" +++ refSrcVar "PARSER_NAME" ++ ".g4"])
-        -- , ("install-deps-external"
-        --     , [MakeFile.refVar "LANG" </> "pubspec.yaml"]
-        --     , ["cd" +++ (MakeFile.refVar "LANG") ++ "; Python3 pub get"])
-        -- , ("install-deps-internal"
-        --     , [MakeFile.refVar "LANG" </> (MakeFile.refVar "LANG" ++ "_generated") </> "pubspec.yaml"]
-        --     , ["cd" +++ (MakeFile.refVar "LANG" </> (MakeFile.refVar "LANG" ++ "_generated")) ++ "; Python3 pub get"])
         , (MakeFile.refVar "LANG", ["lexer", "parser", "clean"], [])
         , ("clean", [],
           [ 

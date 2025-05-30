@@ -9,66 +9,97 @@ import BNFC.CF
 import BNFC.Utils       ( (+++) )
 import BNFC.Backend.Common.NamedVariables ( UserDef )
 import BNFC.Backend.Python3.Common 
-import Data.List (intercalate, intersperse)
+import Data.List (nub)
 
-unwords' :: [String] -> String
-unwords' = concat . intersperse ""
-
-joinArgs :: [String] -> String
-joinArgs = intercalate "\n"
-
--- Produces abstract data types in Python3
 cf2Python3AST :: String -> CF -> String
 cf2Python3AST langName cf = 
   let userTokens = [ n | (n,_) <- tokenPragmas cf ]
   in unlines 
-    $ imports ++ [ "from dataclasses import dataclass" ]  -- import some libraries if needed
-    ++ characterTypedef
+    $ imports 
     ++ generateTokens userTokens
-    ++ generateBaseClass ++ [ "\n" ]
-    ++ concatMap astClasses rules  -- generate user-defined types
+    ++ generateBaseClasses rules
+    ++ concatMap astClasses rules
   where
     rules  = getAbstractSyntax cf
-    imports = []  -- [ "from typing_extensions import assert_never" ]
-    characterTypedef = [ ]
+    imports = [ "from dataclasses import dataclass"
+             ]
     censorName' = censorName langName
     str2Python3ClassName' = str2Python3ClassName langName
-    cat2Python3ClassName' = cat2Python3ClassName langName
-    getVars' = getVars langName
 
     generateTokens :: [UserDef] -> [String]
     generateTokens = map $ \token -> 
         let name = censorName' token 
-        in "typealias" +++ name +++ "= String;"
+        in name +++ "= str  # type alias"
 
-    generateBaseClass :: [String]
-    generateBaseClass = ["class Exp:" +++ "..."]
-          
-    -- | Generates a category class, and classes for all its rules.
+    generateBaseClasses :: [Data] -> [String]
+    generateBaseClasses rules = 
+      let cats = nub $ map fst rules
+          catTypes = nub $ map (stripBrackets . cat2Python3Type') cats
+          prefixedTypes = map (str2Python3ClassName' . catToStr . normCat . Cat) catTypes
+      in concatMap (\catType -> ["\n", "class" +++ catType ++ ": ...", ""]) prefixedTypes
+      where
+        stripBrackets :: String -> String
+        stripBrackets = filter (\c -> c /= '[' && c /= ']')
+
     astClasses :: Data -> [String]
-    astClasses (cat, rules) = categoryClass
-        where
-        funs = map fst rules
-        cases = mapMaybe (prRule cat) rules
-        categoryClass
-          | catToStr cat `elem` funs || isList cat = []  -- the category is also a function or a list
-          | otherwise =
-            let name = cat2Python3ClassName' cat
-            in [] ++ cases
-
-    -- | Generates classes for a rule, depending on what type of rule it is.
-    prRule :: Cat -> (Fun, [Cat]) -> Maybe (String)
-    prRule cat (fun, cats)
+    astClasses (cat, rules) = mapMaybe (mkClassForRule cat) rules
+        
+    mkClassForRule :: Cat -> (String, [Cat]) -> Maybe String
+    mkClassForRule cat (fun, cats)
       | isNilFun fun || 
         isOneFun fun || 
-        isConsFun fun = Nothing  -- these are not represented in the Absyn
-      | otherwise =  -- a standard rule
+        isConsFun fun = Nothing
+      | otherwise =
          Just result
       where
         caseName = str2Python3ClassName' fun
-        vars = getVars' cats
-        caseAssociatedValues = map (\var -> buildVariableName var ++ ": " ++ buildVariableType var ++ "\n") vars
-        result = unwords' $ ["@dataclass" ++ "\n"]
-                          ++ ["class" +++ caseName ++ "(Exp):" ++ "\n"]
-                          ++  indent 1 caseAssociatedValues
-                          ++ ["\n"]
+        vars = getVars langName cats
+        catType = str2Python3ClassName' $ catToStr $ normCat cat
+        caseAssociatedValues = map makeFieldDecl vars
+        result = unlines $
+          [ ""
+          , "@dataclass"
+          , "class" +++ caseName ++ "(" ++ catType ++ "):" ++
+            if null vars 
+              then " ..."
+              else ""
+          ] ++ 
+          (if null vars
+            then []
+            else indent 1 caseAssociatedValues)
+        
+        makeFieldDecl var@((_, _), (varName, idx)) = 
+          let varCat = getCatFromVar var
+              normalizedCat = normCat varCat
+              catStr = catToStr normalizedCat
+              fieldName = if idx > 0 
+                         then toSnakeCase varName ++ show idx
+                         else toSnakeCase varName
+              typeStr = case varCat of
+                ListCat c -> "list[" ++ getTypeStr c ++ "]"
+                TokenCat t -> case name2Python3BuiltIn t of
+                               Just builtinType -> builtinType
+                               Nothing -> stripBrackets $ cat2Python3Type' (TokenCat t)
+                _ -> case name2Python3BuiltIn catStr of
+                       Just builtinType -> builtinType
+                       Nothing -> str2Python3ClassName' catStr
+          in fieldName ++ ": " ++ typeStr
+        
+        stripBrackets :: String -> String
+        stripBrackets = filter (\c -> c /= '[' && c /= ']')
+        
+        getCatFromVar :: Python3Var -> Cat
+        getCatFromVar ((n, catName), _) = 
+          if n > 0 
+            then ListCat (Cat catName)
+            else Cat catName
+
+        getTypeStr :: Cat -> String
+        getTypeStr cat = case cat of
+          TokenCat t -> case name2Python3BuiltIn t of
+                         Just builtinType -> builtinType
+                         Nothing -> stripBrackets $ cat2Python3Type' (TokenCat t)
+          _ -> let catStr = catToStr $ normCat cat
+               in case name2Python3BuiltIn catStr of
+                    Just builtinType -> builtinType
+                    Nothing -> str2Python3ClassName' catStr

@@ -19,6 +19,7 @@ import BNFC.Backend.Antlr (makeAntlr, makeAntlr', DirectoryOptions (DirectoryOpt
 
 import BNFC.Backend.Python3.CFtoPython3AST ( cf2Python3AST )
 import BNFC.Backend.Python3.CFtoPython3Builder ( cf2Python3Builder )
+import BNFC.Backend.Python3.CFtoPython3PrettyPrinter ( cf2Python3PrettyPrinter )
 import BNFC.Backend.Python3.Common ( indent, buildVariableTypeFromPython3Type, cat2Python3ClassName, upperFirst )
 
 makePython3 :: SharedOptions -> CF -> MkFiles ()
@@ -27,21 +28,29 @@ makePython3 opts@Options{..} cf = do
         langBase = dirBase
         libLang = langBase
         srcLang = libLang
-        
-        -- Generates files in an incorrect place
+
     makeAntlr (opts {dLanguage = Python3, optMake = Nothing}) cf
     MakeFile.mkMakefile optMake $ makefileContent dirBase
 
-
+    mkfile (srcLang </> "__init__.py") makePython3Comment ("" :: String)
     mkfile (srcLang </> "ast.py") makePython3Comment astContent
     mkfile (srcLang </> "builder.py") makePython3Comment builderContent
-  
+    mkfile (srcLang </> "printer.py") makePython3Comment printerContent
+    mkfile (srcLang </> "requirements.txt") makePython3Comment requirementsContent
+
+    MakeFile.mkMakefile optMake $ makefileContent dirBase
+
   where
     astContent = cf2Python3AST (firstLowerCase langName) cf
-    builderContent = cf2Python3Builder cf opts
+    builderContent = render $ cf2Python3Builder cf (firstLowerCase langName)
+    printerContent = render $ cf2Python3PrettyPrinter cf (firstLowerCase langName)
+    requirementsContent = unlines
+        [ "antlr4-python3-runtime>=4.13.0"
+        , "antlr4-tools>=0.2.0"
+        ]
     packageName = maybe id (+.+) inPackage $ mkName [] CamelCase lang
     langName = mkName [] CamelCase lang
-    -- langNameUpperCased = firstUpperCase langName
+
     importLangName = "import 'package:" ++ langName ++ "_generated/" ++ langName ++ "_generated.Python3';"
 
     lexerClassName = lang ++ "GrammarLexer"
@@ -53,7 +62,7 @@ makePython3 opts@Options{..} cf = do
       [("LANG", langName)
       , ("LEXER_NAME", upperFirst langName ++ "Lexer")
       , ("PARSER_NAME", upperFirst langName ++ "Parser")
-      , ("ANTLR4", "antlr4") -- installed using pip
+      , ("ANTLR4", "antlr4")
       ]
     refVarInSrc dirBase refVar = dirBase </> MakeFile.refVar refVar
     rmFile :: (String -> String) -> String -> String -> String
@@ -61,13 +70,16 @@ makePython3 opts@Options{..} cf = do
     makefileRules refSrcVar = 
       let rmInSrc = rmFile refSrcVar
       in vcat $ makeRules
-        [ (".PHONY", ["all", "clean", "remove"], [])
-        , ("all", [MakeFile.refVar "LANG"], [])
+        [ (".PHONY", ["all", "clean", "remove", "install"], [])
+        , ("all", ["install", MakeFile.refVar "LANG"], [])
+        , ("install", [],
+            [ "pip install -r " ++ MakeFile.refVar "LANG" ++ "/requirements.txt"
+            ])
         , ("lexer"
-            , [refSrcVar "LEXER_NAME" ++ ".g4"]
+            , ["install", refSrcVar "LEXER_NAME" ++ ".g4"]
             , [MakeFile.refVar "ANTLR4" +++ "-Dlanguage=Python3" +++ refSrcVar "LEXER_NAME" ++ ".g4"])
         , ("parser"
-            , [refSrcVar "PARSER_NAME" ++ ".g4"]
+            , ["install", refSrcVar "PARSER_NAME" ++ ".g4"]
             , [MakeFile.refVar "ANTLR4" +++ "-Dlanguage=Python3" +++ "-no-listener" +++ "-no-visitor" +++ refSrcVar "PARSER_NAME" ++ ".g4"])
         , (MakeFile.refVar "LANG", ["lexer", "parser", "clean"], [])
         , ("clean", [],

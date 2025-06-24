@@ -57,7 +57,7 @@ mkImportDecls cf langName = vcat
     , text "from antlr4 import CommonTokenStream"
     , text "from antlr4.tree.Tree import TerminalNodeImpl"
     , text ""
-    , text $ "from .ast import " ++ intercalate ", " astTypes
+    , astImport
     , text $ "from ." ++ parser ++ " import " ++ parser
     , text $ "from ." ++ lexer ++ " import " ++ lexer
     ]
@@ -65,18 +65,47 @@ mkImportDecls cf langName = vcat
     parser = camelCase_ $ langName ++ "Parser"
     lexer = camelCase_ $ langName ++ "Lexer"
     astTypes = nub $ collectASTTypes cf langName
+    astImport = if null astTypes
+                then text "# No AST types to import"
+                else text $ "from .ast import " ++ intercalate ", " astTypes
 
 collectASTTypes :: CF -> String -> [String]
 collectASTTypes cf langName = 
   let rules = getAbstractSyntax cf
       cats = nub $ map fst rules
-      baseClasses = map (\cat -> 
-        let catStr = catToStr (normCat cat)
-        in str2Python3ClassName langName catStr) cats
+      -- Check if there are any dataclasses (non-list rules)
+      hasDataClasses = any hasNonListRules rules
+      -- Collect all categories that appear in the grammar (including in lists)
+      allUsedCats = nub $ concatMap getAllCatsFromData rules ++ cats
+      -- Include only language-specific type aliases for tokens actually defined in the grammar
+      -- We skip builtin types like Integer/Double since they may not be defined as type aliases
+      -- even when used implicitly in the grammar
+      languageTypeAliases = mapMaybe (\token ->
+        if token `notElem` ["Integer", "Double", "String", "Char", "Ident"] &&
+           any (\c -> case c of
+                       TokenCat t -> t == token
+                       _ -> False) allUsedCats
+        then Just token  -- Use the token name directly, not prefixed with langName
+        else Nothing) (literals cf)
+      typeAliases = languageTypeAliases
+      -- Only collect valid non-list categories for base classes
+      baseClasses = mapMaybe (\cat -> 
+        case cat of
+          ListCat _ -> Nothing  -- Skip list categories
+          TokenCat _ -> Nothing  -- Skip token categories, they are handled as type aliases
+          _ -> let catStr = catToStr (normCat cat)
+               in if catStr `elem` ["Integer", "Double", "String", "Char", "Ident"]
+                  then Nothing  -- These are handled as type aliases
+                  else Just (str2Python3ClassName langName catStr)) cats
       dataClasses = concatMap (getDataClassNames langName) rules
-      result = nub $ baseClasses ++ dataClasses
-  in result
+      validTypes = nub $ typeAliases ++ baseClasses ++ dataClasses
+  in validTypes
   where
+    hasNonListRules (_, ruleList) = any (\(fun, _) -> not (isNilFun fun || isOneFun fun || isConsFun fun)) ruleList
+    
+    getAllCatsFromData :: Data -> [Cat]
+    getAllCatsFromData (cat, rules) = cat : concatMap (\(_, cats) -> cats) rules
+    
     getDataClassNames :: String -> Data -> [String]
     getDataClassNames langName (cat, rules) = 
       mapMaybe (\(fun, cats) -> 
@@ -96,7 +125,7 @@ mkBuildFunction langName cf (cat, rules) =
        indent 3 ["assert_never(type(ctx))  # type: ignore"]
   where
     fnName = case cat of
-      ListCat c -> catToStr c ++ "List"
+      ListCat c -> "List" ++ catToStr c
       _ -> catToStr cat
     
     retType = case cat of
@@ -105,7 +134,7 @@ mkBuildFunction langName cf (cat, rules) =
     
     contextType = camelCase_ langName ++ "Parser." ++ cleanCatName cat ++ "Context"
       where
-        cleanCatName (ListCat c) = catToStr c ++ "List"
+        cleanCatName (ListCat c) = "List" ++ catToStr c
         cleanCatName c = catToStr c
 
 mkCaseStmt :: String -> CF -> Cat -> ((String, [(Cat, Int)]), Integer) -> [String]
@@ -132,8 +161,8 @@ mkIfBody langName fun catsWithIndices mkPattern
               _ -> (cat1, idx1, cat2, idx2)
           buildRestList = mkBuildCall restCat ++ "(ctx." ++ mkPattern restIdx ++ ")"
           buildElement = mkBuildCall elemCat ++ "(ctx." ++ mkPattern elemIdx ++ ")"
-      in [indent 3 ["rest_list = " ++ buildRestList,
-                   "element = " ++ buildElement,
+      in [indent 3 ["element = " ++ buildElement,
+                   "rest_list = " ++ buildRestList,
                    "return [element] + rest_list"]]
   | isCoercion fun =
       let (nextCat, idx) = head catsWithIndices
@@ -152,7 +181,7 @@ mkIfBody langName fun catsWithIndices mkPattern
 
 mkBuildCall :: Cat -> String
 mkBuildCall cat = case cat of
-  ListCat c -> "build" ++ catToStr c ++ "List"
+  ListCat c -> "buildList" ++ catToStr c
   TokenCat t -> getTokenBuilderName t
   c -> "build" ++ catToStr c
 
@@ -164,14 +193,17 @@ mkBuildEntrypointFunction langName cf = vcat $ map text $
         , "stream = CommonTokenStream(lexer)"
         , "parser = " ++ parser ++ "(stream)"
         , ""
-        , "return build" ++ catType ++ "(parser.start_" ++ catType ++ "().children[0])"
+        , "return build" ++ catType ++ "(parser.start_" ++ catType ++ "()." ++ methodName ++ "())"
         ]
   where
     groups = cfToGroups cf
     cat = fst (head groups)
     catType = case cat of
-      ListCat c -> catToStr c ++ "List"
+      ListCat c -> "List" ++ catToStr c
       _ -> catToStr cat
+    methodName = case cat of
+      ListCat c -> "list" ++ catToStr c  -- ANTLR generates method names like listInteger
+      _ -> map toLower (catToStr cat)
     returnType = case cat of
       ListCat c -> "list[" ++ getCorrectTypeName langName c ++ "]"
       _ -> getCorrectTypeName langName cat

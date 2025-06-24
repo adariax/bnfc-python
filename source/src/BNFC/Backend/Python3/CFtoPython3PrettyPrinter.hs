@@ -13,6 +13,18 @@ import Text.PrettyPrint.HughesPJClass (Doc, text, vcat, nest)
 import qualified BNFC.Backend.Python3.Common as Common
 import BNFC.Options (SharedOptions(..))
 
+-- Escape Python string literals properly
+escapePythonString :: String -> String
+escapePythonString = concatMap escapeChar
+  where
+    escapeChar '\\' = "\\\\"
+    escapeChar '\'' = "\\'"
+    escapeChar '"' = "\\\""
+    escapeChar '\n' = "\\n"
+    escapeChar '\t' = "\\t"
+    escapeChar '\r' = "\\r"
+    escapeChar c = [c]
+
 cf2Python3PrettyPrinter :: CF -> String -> Doc
 cf2Python3PrettyPrinter cf langName = vcat
     [ importDecls
@@ -36,16 +48,25 @@ mkImportDecls :: CF -> String -> Doc
 mkImportDecls cf langName = vcat
     [ text "from typing import assert_never"
     , text ""
-    , text $ "from .ast import " ++ intercalate ", " (getAllASTTypes cf langName)
+    , astImport
     , text ""
     ]
+  where
+    astTypes = getAllASTTypes cf langName
+    astImport = if null astTypes
+                then text "# No AST types to import"
+                else text $ "from .ast import " ++ intercalate ", " astTypes
 
 getAllASTTypes :: CF -> String -> [String]
 getAllASTTypes cf langName = 
     let rules = getAbstractSyntax cf
         baseClasses = nub $ map (Common.censorName langName . catToStr . normCat . fst) rules
         dataClasses = concatMap (getDataClassNames langName) rules
-    in nub $ baseClasses ++ dataClasses
+        -- Add built-in types if no dataclasses exist
+        builtinTypes = if null dataClasses then ["Integer", "Double", "String", "Char", "Ident"] else []
+        -- Filter out invalid Python identifiers (like [Bar])
+        validNames = filter isValidPythonIdentifier (baseClasses ++ dataClasses ++ builtinTypes)
+    in nub validNames
   where
     getDataClassNames :: String -> Data -> [String]
     getDataClassNames langName (cat, rules) = 
@@ -53,6 +74,12 @@ getAllASTTypes cf langName =
             if isNilFun fun || isOneFun fun || isConsFun fun
             then Nothing
             else Just (Common.str2Python3ClassName langName fun)) rules
+    
+    isValidPythonIdentifier :: String -> Bool
+    isValidPythonIdentifier name = 
+        not (null name) && 
+        not ('[' `elem` name) && 
+        not (']' `elem` name)
 
 mkRendererClass :: Doc
 mkRendererClass = vcat
@@ -283,11 +310,10 @@ mkNodePrettifier cf langName cat@(Cat _) = vcat
     [ text "\n"
     , text $ "def prettify_" ++ catName ++ "(node: " ++ catType ++ ") -> list[str]:"
     , nest 4 $ vcat
-        [ text "result: list[str] = []"
-        , text "match node:"
+        [ text "match node:"
         , nest 4 $ vcat $ map mkCaseStmt rules
         , nest 4 $ text "case _:"
-        , nest 8 $ text "assert_never(type(node))  # type: ignore"
+        , nest 8 $ text "assert_never(node)"
         ]
     ]
   where
@@ -298,7 +324,7 @@ mkNodePrettifier cf langName cat@(Cat _) = vcat
             rulesForNormalizedCat cf cat
     
     mkCaseStmt (ruleLabel, sentForm) = vcat
-        [ text $ "case " ++ ruleLabel ++ "():"
+        [ text $ "case " ++ Common.str2Python3ClassName langName ruleLabel ++ "():"
         , nest 4 $ mkRulePrettifier langName (ruleLabel, sentForm)
         ]
 
@@ -321,7 +347,7 @@ mkNodePrettifier cf langName cat@(CoercCat _ _) = vcat
               filter (not . isCoercion . funRule) $ rulesForCat cf cat
     
     mkCaseStmt (ruleLabel, sentForm) = vcat
-        [ text $ "case " ++ ruleLabel ++ "():"
+        [ text $ "case " ++ Common.str2Python3ClassName langName ruleLabel ++ "():"
         , nest 4 $ mkRulePrettifier langName (ruleLabel, sentForm)
         ]
     
@@ -347,7 +373,7 @@ mkNodePrettifier cf langName cat@(CoercCat _ _) = vcat
                 line = "result.extend(prettify_" ++ catName ++ "(node))"
             in (fieldIdx, acc ++ [line])
         mkItem (fieldIdx, acc) (Right terminal) = 
-            (fieldIdx, acc ++ ["result.append('" ++ terminal ++ "')"])
+            (fieldIdx, acc ++ ["result.append('" ++ escapePythonString terminal ++ "')"])
 
 mkNodePrettifier cf langName listCat@(ListCat _) = vcat
     [ text "\n"
@@ -357,7 +383,7 @@ mkNodePrettifier cf langName listCat@(ListCat _) = vcat
         , text "for i, item in enumerate(node_list):"
         , nest 4 $ vcat
             [ text "if i > 0:"
-            , nest 4 $ text $ "result.append('" ++ separator ++ "')"
+            , nest 4 $ text $ "result.append('" ++ escapePythonString separator ++ "')"
             , text $ "result.extend(prettify_" ++ itemCatName ++ "(item))"
             ]
         , text "return result"
@@ -404,4 +430,4 @@ mkRulePrettifier langName (ruleLabel, sentForm) = vcat
                     line = "result.extend(prettify_" ++ catName ++ "(node." ++ fieldName ++ "))"
                 in (fieldIdx + 1, acc ++ [line])
         mkItem (fieldIdx, acc) (Right terminal) = 
-            (fieldIdx, acc ++ ["result.append('" ++ terminal ++ "')"])
+            (fieldIdx, acc ++ ["result.append('" ++ escapePythonString terminal ++ "')"])

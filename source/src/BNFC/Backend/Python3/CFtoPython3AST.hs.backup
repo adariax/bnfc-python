@@ -8,7 +8,7 @@ import Data.Maybe      ( mapMaybe )
 import BNFC.CF
 import BNFC.Utils       ( (+++) )
 import BNFC.Backend.Common.NamedVariables ( UserDef )
-import BNFC.Backend.Python3.Common (isPythonKeyword, str2Python3ClassName, name2Python3BuiltIn, toSnakeCase, Python3Var, getVars) 
+import BNFC.Backend.Python3.Common 
 import Data.List (nub, intercalate)
 
 cf2Python3AST :: String -> CF -> String
@@ -17,22 +17,30 @@ cf2Python3AST langName cf =
       rules = getAbstractSyntax cf
       rulesByCategory = rules
       
+      -- Generate imports
       imports = ["from __future__ import annotations"
                 ,"from dataclasses import dataclass"
                 ,""]
-
-      tokens = mapMaybe generateTokenMaybe userTokens
+      
+      -- Generate token type aliases
+      tokens = map generateToken userTokens
+      
+      -- Generate dataclasses (without inheritance)
       classes = concatMap (generateClasses langName) rulesByCategory
+      
+      -- Generate union types
       unions = generateUnions langName rulesByCategory
+      
+      -- Handle separator-only grammars by creating basic type aliases
       separatorTypes = generateSeparatorTypes langName cf
+      
+      -- Generate basic type aliases for built-in types that are used
       builtinAliases = generateBuiltinAliases langName cf
       
   in unlines $ imports ++ tokens ++ classes ++ unions ++ separatorTypes ++ builtinAliases
 
-generateTokenMaybe :: UserDef -> Maybe String
-generateTokenMaybe token 
-  | isPythonKeyword token = Nothing
-  | otherwise = Just (token +++ "= str  # type alias")
+generateToken :: UserDef -> String
+generateToken token = token +++ "= str  # type alias"
 
 generateClasses :: String -> Data -> [String]
 generateClasses langName (cat, rules) = 
@@ -63,11 +71,7 @@ generateField langName ((listDepth, typeName), (varName, idx)) =
       
       baseType = case name2Python3BuiltIn typeName of
                   Just builtinType -> builtinType
-                  Nothing -> 
-                    let className = str2Python3ClassName langName typeName
-                    in if isPythonKeyword className
-                       then "str"
-                       else className
+                  Nothing -> str2Python3ClassName langName typeName
       
       finalType = addListWrappers listDepth baseType
       
@@ -107,20 +111,18 @@ getConstructorsForCategory langName allRules targetCategory =
 
 generateSeparatorTypes :: String -> CF -> [String]
 generateSeparatorTypes langName cf = 
-  let allCats = filter (not . isList) (allParserCats cf)
+  let allCats = allParserCats cf
       rules = getAbstractSyntax cf
+      -- Find categories that have no explicit constructors (separator-only)
       categoriesWithRules = map fst rules
       separatorOnlyCats = filter (\cat -> cat `notElem` categoriesWithRules) allCats
+      -- Also check for built-in types that need aliases
       builtinCats = filter isBuiltinCat allCats
       allMissingCats = nub (separatorOnlyCats ++ builtinCats)
-      existingUnionCats = nub $ map (getCategoryName langName . fst) rules
-      finalMissingCats = filter (\cat -> getCategoryName langName cat `notElem` existingUnionCats) allMissingCats
-      typeAliases = mapMaybe (createTypeAlias langName) finalMissingCats
+      -- Create type aliases for built-in types
+      typeAliases = mapMaybe (createTypeAlias langName) allMissingCats
   in if null typeAliases then [] else "" : typeAliases
   where
-    isList (ListCat _) = True
-    isList _ = False
-    
     isBuiltinCat cat = case catToStr (normCat cat) of
       "Integer" -> True
       "Double" -> True
@@ -133,29 +135,28 @@ generateSeparatorTypes langName cf =
       let catName = str2Python3ClassName langName (catToStr (normCat cat))
           baseType = case name2Python3BuiltIn (catToStr (normCat cat)) of
                       Just builtinType -> builtinType
-                      Nothing -> "str"
-      in if catName /= baseType && not (isPythonKeyword catName) && not ('[' `elem` catName) && catName /= "Exp"
+                      Nothing -> "str"  -- Default fallback
+      in if catName /= baseType && not (checkRegistered catName)
          then Just (catName +++ "=" +++ baseType +++ " # type alias")
          else Nothing
 
 generateBuiltinAliases :: String -> CF -> [String]
 generateBuiltinAliases langName cf = 
-  let
+  let -- Check if we have any explicit dataclass rules
       rules = getAbstractSyntax cf
       hasDataClasses = any hasNonListRules rules
+      -- If we have no dataclasses, generate basic type aliases
       basicTypes = if hasDataClasses then [] else ["Integer", "Double", "String", "Char", "Ident"]
-      existingUnionCats = nub $ map (getCategoryName langName . fst) rules
-      filteredBasicTypes = filter (\typeName -> str2Python3ClassName langName typeName `notElem` existingUnionCats) basicTypes
-      aliases = mapMaybe (createBuiltinAlias langName existingUnionCats) filteredBasicTypes
+      aliases = mapMaybe (createBuiltinAlias langName) basicTypes
   in if null aliases then [] else "" : aliases
   where
     hasNonListRules (_, ruleList) = any (\(fun, _) -> not (isNilFun fun || isOneFun fun || isConsFun fun)) ruleList
     
-    createBuiltinAlias langName existingUnions typeName = 
+    createBuiltinAlias langName typeName = 
       let className = str2Python3ClassName langName typeName
           baseType = case name2Python3BuiltIn typeName of
                       Just builtinType -> builtinType
                       Nothing -> "str"
-      in if className /= baseType && not (isPythonKeyword className) && not ('[' `elem` className) && className `notElem` existingUnions
+      in if className /= baseType && not (checkRegistered className)
          then Just (className +++ "=" +++ baseType +++ " # type alias")
          else Nothing

@@ -36,7 +36,7 @@ makePython3 opts@Options{..} cf = do
     mkfile (srcLang </> "ast.py") makePython3Comment astContent
     mkfile (srcLang </> "builder.py") makePython3Comment builderContent
     mkfile (srcLang </> "printer.py") makePython3Comment printerContent
-    mkfile (srcLang </> "requirements.txt") makePython3Comment requirementsContent
+    mkfile ("requirements.txt") makePython3Comment requirementsContent
 
     MakeFile.mkMakefile optMake $ makefileContent dirBase
 
@@ -49,7 +49,7 @@ makePython3 opts@Options{..} cf = do
         , "antlr4-tools>=0.2.0"
         ]
     packageName = maybe id (+.+) inPackage $ mkName [] CamelCase lang
-    langName = mkName [] CamelCase lang
+    langName = sanitizePythonModuleName $ mkName [] CamelCase lang
 
     importLangName = "import 'package:" ++ langName ++ "_generated/" ++ langName ++ "_generated.Python3';"
 
@@ -73,7 +73,7 @@ makePython3 opts@Options{..} cf = do
         [ (".PHONY", ["all", "clean", "remove", "install"], [])
         , ("all", ["install", MakeFile.refVar "LANG"], [])
         , ("install", [],
-            [ "pip install -r " ++ MakeFile.refVar "LANG" ++ "/requirements.txt"
+            [ "pip install -r requirements.txt"
             ])
         , ("lexer"
             , ["install", refSrcVar "LEXER_NAME" ++ ".g4"]
@@ -103,3 +103,7 @@ makePython3CommentYaml = ("# Python3" ++)
 
 toLowerCase :: String -> String
 toLowerCase = map toLower
+
+-- | Sanitize module name for Python (replace dashes with underscores, etc.)
+sanitizePythonModuleName :: String -> String
+sanitizePythonModuleName = map (\c -> if c == '-' then '_' else c)
